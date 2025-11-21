@@ -94,3 +94,18 @@ input.addEventListener("input", () => {
     socket.emit("stopTyping");
   }, 800);
 });
+
+// Mostrar "Fulano está digitando..."
+socket.on("userTyping", (usernameTyping) => {
+  const el = document.getElementById("typingIndicator");
+  el.textContent = `${usernameTyping} está digitando...`;
+});
+
+// Apagar quando parar
+socket.on("userStoppedTyping", () => {
+  const el = document.getElementById("typingIndicator");
+  el.textContent = "";
+});
+
+
+
