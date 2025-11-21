@@ -100,6 +100,15 @@ const rateLimit = new Map();
 io.on("connection", async (socket) => {
   socket.data.userId = randomUUID();
 
+  socket.on("typing", () => {
+  socket.broadcast.emit("userTyping", socket.data.username || "Anônimo");
+  });
+
+  socket.on("stopTyping", () => {
+  socket.broadcast.emit("userStoppedTyping", socket.data.username || "Anônimo");
+  });
+
+
   // Obter IP real
   let ip = socket.handshake.headers["x-forwarded-for"] || socket.handshake.address;
   if (Array.isArray(ip)) ip = ip[0];
@@ -143,6 +152,8 @@ io.on("connection", async (socket) => {
     });
   });
 
+
+
   socket.on("disconnect", () => {
     if (socket.data.username) {
       socket.broadcast.emit("systemMessage", `${socket.data.username} saiu do chat.`);
@@ -150,8 +161,11 @@ io.on("connection", async (socket) => {
   });
 });
 
+
+
 // ================================
 // Iniciar servidor
 // ================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Servidor ativo na porta ${PORT}`));
+
