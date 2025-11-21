@@ -5,16 +5,18 @@ const input = document.getElementById('input');
 const messages = document.getElementById('messages');
 const usernameInput = document.getElementById('username');
 
+let username = null;
+
 // Mensagens antigas
 socket.on("loadMessages", (msgs) => {
   msgs.forEach(m => {
-    addMessage(`${formatTime(m.time)} <strong>${escapeHtml(m.username)}:</strong> ${escapeHtml(m.text)}`);
+    addMessage(m.username, m.text, m.time);
   });
 });
 
-// Mensagens novas
+// Mensagens do chat
 socket.on("chatMessage", (payload) => {
-  addMessage(`${formatTime(payload.time)} <strong>${escapeHtml(payload.username)}:</strong> ${escapeHtml(payload.text)}`);
+  addMessage(payload.username, payload.text, payload.time);
 });
 
 // Mensagens do sistema
@@ -23,26 +25,38 @@ socket.on("systemMessage", (text) => {
 });
 
 function joinChatIfNeeded() {
-  const name = usernameInput.value.trim();
-  socket.emit("join", name || "Anônimo");
+  if (!username) {
+    username = usernameInput.value.trim() || "Anônimo";
+    socket.emit("join", username);
+  }
 }
 
-form.addEventListener('submit', (e) => {
+form.addEventListener("submit", e => {
   e.preventDefault();
-  const message = input.value.trim();
-  if (!message) return;
+
+  const msg = input.value.trim();
+  if (!msg) return;
 
   joinChatIfNeeded();
-  socket.emit("chatMessage", message);
+  socket.emit("chatMessage", msg);
 
   input.value = "";
   input.focus();
 });
 
-function addMessage(html) {
+function addMessage(user, text, time) {
   const li = document.createElement("li");
-  li.className = "message";
-  li.innerHTML = html;
+
+  const isMe = (user === username);
+  li.className = "message " + (isMe ? "me" : "other");
+
+  li.innerHTML = `
+    <small style="opacity:.7; font-size:12px;">
+      ${formatTime(time)} • ${escapeHtml(user)}
+    </small><br>
+    ${escapeHtml(text)}
+  `;
+
   messages.appendChild(li);
   messages.scrollTop = messages.scrollHeight;
 }
@@ -56,8 +70,7 @@ function addSystemMessage(text) {
 }
 
 function formatTime(iso) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString();
+  return new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 }
 
 function escapeHtml(str) {
