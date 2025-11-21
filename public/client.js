@@ -78,3 +78,19 @@ function escapeHtml(str) {
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
 }
+
+let typing = false;
+let typingTimeout;
+
+input.addEventListener("input", () => {
+  if (!typing) {
+    typing = true;
+    socket.emit("typing");
+  }
+
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    typing = false;
+    socket.emit("stopTyping");
+  }, 800);
+});
