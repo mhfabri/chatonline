@@ -2,11 +2,12 @@ import express from "express";
 import http from "http";
 import path from "path";
 import { Server } from "socket.io";
-import fs from "fs";
+import fs from "fs/promises";
+import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { randomUUID, createHmac } from "crypto";
 
-// Correção para __dirname no ES Modules
+// Corrigir __dirname em ESModules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -14,102 +15,121 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Caminho do arquivo JSON
+// Permitir obter IP real no Railway/Nginx
+app.set("trust proxy", true);
+
+// Caminho para o JSON
 const messagesPath = path.join(__dirname, "messages.json");
 
-// Chave secreta para HMAC (defina em variáveis de ambiente em produção)
+// Chave secreta segura
 const IP_HASH_SECRET = process.env.IP_HASH_SECRET || "dev_fallback_secret_do_not_use_in_prod";
 if (!process.env.IP_HASH_SECRET) {
-  console.warn("⚠️  AVISO: IP_HASH_SECRET não definido. Usando fallback inseguro. Defina a variável de ambiente em produção.");
+  console.warn("⚠️ AVISO: usando IP_HASH_SECRET inseguro. Defina no Railway!");
 }
 
-// Função para gerar hash HMAC do IP
+// Hash seguro para IP
 function hashIp(ip) {
   try {
     if (!ip) return null;
     return createHmac("sha256", IP_HASH_SECRET).update(String(ip)).digest("hex");
-  } catch (e) {
-    console.error("Erro ao hash do IP:", e);
+  } catch (err) {
+    console.error("Erro ao gerar hash:", err);
     return null;
   }
 }
 
-// Função para carregar mensagens
-function loadMessages() {
+// Carregar mensagens de forma segura
+async function loadMessages() {
   try {
-    if (!fs.existsSync(messagesPath)) {
-      // cria arquivo vazio se não existir
-      fs.writeFileSync(messagesPath, "[]", "utf8");
+    if (!existsSync(messagesPath)) {
+      await fs.writeFile(messagesPath, "[]", "utf8");
+      return [];
     }
-    const data = fs.readFileSync(messagesPath, "utf8");
-    return JSON.parse(data || "[]");
+
+    const data = await fs.readFile(messagesPath, "utf8");
+
+    try {
+      return JSON.parse(data || "[]");
+    } catch {
+      console.error("⚠️ Arquivo messages.json corrompido! Gerando novo arquivo.");
+      await fs.writeFile(messagesPath, "[]", "utf8");
+      return [];
+    }
+
   } catch (err) {
     console.error("Erro ao carregar messages.json:", err);
     return [];
   }
 }
 
-// Função para salvar mensagens
-function saveMessages(messages) {
+// Salvar mensagens (não bloquear o Node)
+async function saveMessages(messages) {
   try {
-    fs.writeFileSync(messagesPath, JSON.stringify(messages, null, 2), "utf8");
+    // Se chegar a mais de 5MB, zera o arquivo
+    if (JSON.stringify(messages).length > 5 * 1024 * 1024) {
+      console.warn("⚠️ messages.json muito grande → resetando arquivo.");
+      messages = [];
+    }
+
+    await fs.writeFile(messagesPath, JSON.stringify(messages, null, 2), "utf8");
   } catch (err) {
     console.error("Erro ao salvar messages.json:", err);
   }
 }
 
-// Servindo arquivos da pasta public
+// Servir diretório public/
 app.use(express.static(path.join(__dirname, "public")));
 
-io.on("connection", (socket) => {
-  // ID único do usuário
+// 🚀 Controle de Spam (1 msg / 0.5s)
+const rateLimit = new Map();
+
+io.on("connection", async (socket) => {
   socket.data.userId = randomUUID();
 
-  // Tenta obter o IP real (considerando proxies reversos)
-  let ip =
-    (socket.handshake.headers && socket.handshake.headers["x-forwarded-for"]) ||
-    socket.handshake.address ||
-    (socket.conn && socket.conn.remoteAddress) ||
-    null;
+  // Obter IP real
+  let ip = socket.handshake.headers["x-forwarded-for"] || socket.handshake.address;
 
-  // x-forwarded-for pode ter lista "client, proxy1, proxy2" → pegamos o primeiro
-  if (typeof ip === "string" && ip.includes(",")) {
-    ip = ip.split(",")[0].trim();
+  // Pode vir como array ou com vírgulas
+  if (Array.isArray(ip)) ip = ip[0];
+  if (typeof ip === "string" && ip.includes(",")) ip = ip.split(",")[0].trim();
+
+  // Normalizar IPv6 "::ffff:1.2.3.4"
+  if (typeof ip === "string" && ip.startsWith("::ffff:")) {
+    ip = ip.replace("::ffff:", "");
   }
 
-  // Armazena apenas o hash do IP
   socket.data.ipHash = hashIp(ip);
 
-  console.log("Novo usuário conectado:", socket.id, "ipHash:", socket.data.ipHash);
+  console.log("Usuário conectado:", socket.id, "IP Hash:", socket.data.ipHash);
 
-  // Envia mensagens antigas para o usuário
-  socket.emit("loadMessages", loadMessages());
+  // Enviar histórico
+  socket.emit("loadMessages", await loadMessages());
 
   socket.on("join", (username) => {
     socket.data.username = username || "Anônimo";
     socket.broadcast.emit("systemMessage", `${socket.data.username} entrou no chat.`);
   });
 
-  socket.on("chatMessage", (msg) => {
+  socket.on("chatMessage", async (msg) => {
+
+    // Proteção anti-spam
+    const last = rateLimit.get(socket.id);
+    if (last && Date.now() - last < 500) return;
+    rateLimit.set(socket.id, Date.now());
+
     const newMsg = {
-      messageId: randomUUID(),         // id da mensagem
-      userId: socket.data.userId,      // id do usuário (UUID)
-      ipHash: socket.data.ipHash,      // hash do IP (HMAC-SHA256)
+      messageId: randomUUID(),
+      userId: socket.data.userId,
+      ipHash: socket.data.ipHash,
       username: socket.data.username || "Anônimo",
-      text: String(msg).slice(0, 1000), // limite por segurança
+      text: String(msg).slice(0, 1000),
       time: new Date().toISOString()
     };
 
-    // Carrega mensagens antigas
-    const messages = loadMessages();
-
-    // Adiciona nova
+    const messages = await loadMessages();
     messages.push(newMsg);
+    await saveMessages(messages);
 
-    // Salva no JSON
-    saveMessages(messages);
-
-    // Envia para todos os usuários
     io.emit("chatMessage", newMsg);
   });
 
@@ -120,5 +140,6 @@ io.on("connection", (socket) => {
   });
 });
 
+// Porta do Railway
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Servidor rodando em http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Servidor ativo na porta ${PORT}`));
