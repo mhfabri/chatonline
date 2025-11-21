@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat Online - Node.js + Socket.IO</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="chat-wrapper">
+    <header>
+      <h1>Chat Online</h1>
+    </header>
+
+    <main id="chat">
+      <ul id="messages"></ul>
+    </main>
+
+    <form id="form" autocomplete="off">
+      <input id="username" placeholder="Seu nome" maxlength="20" />
+      <input id="input" placeholder="Digite uma mensagem..." autocomplete="off" />
+      <button type="submit">Enviar</button>
+    </form>
+  </div>
+
+  <!-- Socket.IO cliente (servido automaticamente pelo servidor) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
