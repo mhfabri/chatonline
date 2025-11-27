@@ -145,8 +145,8 @@ body {
 /* Responsividade */
 @media (max-width: 480px) {
   .chat-container {
-    width: 100%;
-    height: 80vh;
+    width: auto;
+    height: auto;
     border-radius: 0;
   }
 }
